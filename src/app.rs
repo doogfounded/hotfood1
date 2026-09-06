@@ -224,7 +224,7 @@ impl GfxState {
             }),
             primitive: wgpu::PrimitiveState {
                 topology:          wgpu::PrimitiveTopology::TriangleList,
-                front_face:        wgpu::FrontFace::Ccw,
+                front_face:        wgpu::FrontFace::Cw,
                 cull_mode:         Some(wgpu::Face::Back),
                 ..Default::default()
             },
@@ -315,10 +315,11 @@ impl GfxState {
         heat::diffuse(&mut self.heat_map, dt);
         heat::upload(&self.heat_map, &self.queue);
 
+
+
         // Upload camera uniform
         let vp  = camera::view_proj(&self.camera);
-        let uni = camera_uniform(vp);
-        self.queue.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&uni));
+        self.queue.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&camera_uniform(vp)));
 
         // Get surface texture
         let output  = match self.surface.get_current_texture() {
@@ -396,6 +397,7 @@ impl ApplicationHandler for State {
             .with_inner_size(winit::dpi::LogicalSize::new(1280u32, 720u32));
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
         self.gfx   = Some(pollster::block_on(GfxState::new(window)));
+        
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId,

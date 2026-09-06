@@ -27,7 +27,7 @@ pub fn create(aspect: f32) -> Camera {
 pub fn update(cam: &mut Camera, move_input: Vec3, mouse_delta: (f32, f32), dt: f32) {
     // Mouse look
     let sensitivity = 0.002_f32;
-    cam.yaw   += mouse_delta.0 * sensitivity;
+    cam.yaw   -= mouse_delta.0 * sensitivity;
     cam.pitch -= mouse_delta.1 * sensitivity;
     cam.pitch  = cam.pitch.clamp(-FRAC_PI_2 + 0.05, FRAC_PI_2 - 0.05);
 
