@@ -1,5 +1,6 @@
 mod app;
 mod camera;
+mod heat;
 mod room;
 
 use winit::event_loop::EventLoop;

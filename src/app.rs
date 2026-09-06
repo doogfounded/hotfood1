@@ -11,7 +11,7 @@ use winit::{
     window::{CursorGrabMode, Window, WindowId},
 };
 
-use crate::{camera, room};
+use crate::{camera, heat, room};
 
 // ── Camera uniform (must match room.wgsl) ────────────────────────────────────
 
@@ -62,16 +62,20 @@ struct GfxState {
     depth_view:    wgpu::TextureView,
 
     // Room rendering
-    room_geo:       room::RoomGeometry,
+    room_geo:        room::RoomGeometry,
     render_pipeline: wgpu::RenderPipeline,
-    camera_buf:     wgpu::Buffer,
-    camera_bg:      wgpu::BindGroup,
+    camera_buf:      wgpu::Buffer,
+    camera_bg:       wgpu::BindGroup,
+
+    // Heat
+    heat_map: heat::HeatMap,
+    heat_bg:  wgpu::BindGroup,
 
     // Per-frame state
-    camera:         camera::Camera,
-    input:          InputState,
-    last_frame:     std::time::Instant,
-    cursor_locked:  bool,
+    camera:        camera::Camera,
+    input:         InputState,
+    last_frame:    std::time::Instant,
+    cursor_locked: bool,
 }
 
 fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32)
@@ -167,12 +171,35 @@ impl GfxState {
             }],
         });
 
+        // Heat bind group layout
+        let heat_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("heat_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding:    0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled:   false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding:    1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         // Render pipeline
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/room.wgsl"));
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label:                Some("room_pl"),
-            bind_group_layouts:   &[&bgl],
+            bind_group_layouts:   &[&bgl, &heat_bgl],
             push_constant_ranges: &[],
         });
 
@@ -215,6 +242,28 @@ impl GfxState {
 
         let room_geo = room::create(&device);
 
+        // Heat map — pre-stamp a couple of blobs so something is visible immediately
+        let mut heat_map = heat::create(&device);
+        heat::stamp(&mut heat_map, 0.5,  0.5,  0.12, 1.0);  // center
+        heat::stamp(&mut heat_map, 0.25, 0.3,  0.08, 0.7);  // left
+        heat::stamp(&mut heat_map, 0.72, 0.65, 0.06, 0.5);  // right
+        heat::upload(&heat_map, &queue);
+
+        let heat_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:   Some("heat_bg"),
+            layout:  &heat_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding:  0,
+                    resource: wgpu::BindingResource::TextureView(&heat_map.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding:  1,
+                    resource: wgpu::BindingResource::Sampler(&heat_map.sampler),
+                },
+            ],
+        });
+
         let aspect = size.width as f32 / size.height.max(1) as f32;
         let cam    = camera::create(aspect);
 
@@ -230,6 +279,8 @@ impl GfxState {
             render_pipeline,
             camera_buf,
             camera_bg,
+            heat_map,
+            heat_bg,
             camera: cam,
             input:  InputState::default(),
             last_frame: std::time::Instant::now(),
@@ -259,6 +310,10 @@ impl GfxState {
         if self.cursor_locked {
             camera::update(&mut self.camera, mv, mouse, dt);
         }
+
+        // Diffuse + upload heat
+        heat::diffuse(&mut self.heat_map, dt);
+        heat::upload(&self.heat_map, &self.queue);
 
         // Upload camera uniform
         let vp  = camera::view_proj(&self.camera);
@@ -301,6 +356,7 @@ impl GfxState {
 
             pass.set_pipeline(&self.render_pipeline);
             pass.set_bind_group(0, &self.camera_bg, &[]);
+            pass.set_bind_group(1, &self.heat_bg, &[]);
             room::render(&self.room_geo, &mut pass);
         }
 
